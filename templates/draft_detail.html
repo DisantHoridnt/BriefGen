@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="text-lg font-semibold mb-2">{{ draft.template }}</h2>
+<div id="qa" class="bg-white border rounded-xl p-4 mb-4"></div>
+<div class="bg-white border rounded-xl p-4">
+  <div class="flex items-center justify-between mb-2">
+    <div class="font-semibold">Draft (JSON)</div>
+    <div class="space-x-2">
+      <a id="downloadLink" class="px-3 py-1 bg-black text-white rounded text-sm disabled:opacity-40" href="/export/{{ draft.id }}.docx">Download DOCX</a>
+    </div>
+  </div>
+  <pre id="final" class="text-xs text-gray-700 whitespace-pre-wrap">Waiting…</pre>
+</div>
+<script>
+const draftId = "{{ draft.id }}";
+async function step(answer) {
+  const body = answer ? {"draft_id": draftId, "last_answer": answer} : {"draft_id": draftId};
+  const res = await fetch("/agent/next", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  const data = await res.json();
+  const qa = document.getElementById("qa");
+  const final = document.getElementById("final");
+  const dl = document.getElementById("downloadLink");
+  if (data.type === "question") {
+    qa.innerHTML = `<label class="block text-sm mb-1 font-medium">${data.question.text}</label>
+                    <input id="ans" class="w-full border rounded px-3 py-2 mb-2" placeholder="${data.question.hint || ''}">
+                    <button class="px-3 py-2 bg-black text-white rounded" onclick="reply('${data.question.field}')">Next</button>`;
+    final.textContent = "Waiting for essential facts…";
+    dl.classList.add("pointer-events-none","opacity-50");
+  } else if (data.type === "final") {
+    qa.innerHTML = `<div class="text-sm text-green-700">Draft ready. You can regenerate by editing answers (use browser Back) or continue.</div>`;
+    final.textContent = JSON.stringify(data.draft, null, 2);
+    dl.classList.remove("pointer-events-none","opacity-50");
+  } else {
+    qa.textContent = "Unexpected response";
+  }
+}
+async function reply(field) {
+  const val = document.getElementById("ans").value;
+  await step({question_id: "n/a", field, text: val});
+}
+step();
+</script>
+{% endblock %}

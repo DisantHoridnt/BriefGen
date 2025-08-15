@@ -1,0 +1,22 @@
+services:
+  briefgen:
+    build: .
+    # Optional on Apple Silicon if you see arch issues:
+    # platform: "linux/amd64"
+    ports: ["8000:8000"]
+    environment:
+      - ADMIN_PASS=${ADMIN_PASS}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY}
+      - TOGETHER_MODEL=${TOGETHER_MODEL}
+      - APP_SECRET=${APP_SECRET}
+      - BASE_URL=${BASE_URL:-http://localhost:8000}
+      - TZ=Asia/Kolkata
+      - BRIEFGEN_DB=/data/briefgen.db
+    volumes:
+      - briefgen_data:/data
+    # Add this block:
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+volumes:
+  briefgen_data:

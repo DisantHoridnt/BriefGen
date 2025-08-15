@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid md:grid-cols-2 gap-6">
+  <div class="bg-white border rounded-xl p-6 shadow-sm">
+    <h2 class="text-lg font-semibold mb-3">Start a new draft</h2>
+    <form method="post" action="/drafts" class="space-y-3">
+      <label class="block text-sm">Template</label>
+      <select name="template" class="w-full border rounded px-3 py-2">
+        {% for t in templates %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+      <button class="px-4 py-2 bg-black text-white rounded">Start</button>
+    </form>
+  </div>
+  <div class="bg-white border rounded-xl p-6 shadow-sm">
+    <h2 class="text-lg font-semibold mb-3">How it works</h2>
+    <ol class="list-decimal ml-5 space-y-1 text-sm">
+      <li>Choose a template.</li>
+      <li>Answer 3–7 focused questions.</li>
+      <li>Generate a structured draft and download DOCX.</li>
+    </ol>
+  </div>
+</div>
+{% endblock %}
