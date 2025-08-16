@@ -12,11 +12,30 @@ services:
       - BASE_URL=${BASE_URL:-http://localhost:8000}
       - TZ=Asia/Kolkata
       - BRIEFGEN_DB=/data/briefgen.db
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:5173}
     volumes:
       - briefgen_data:/data
     # Add this block:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+
+  frontend:
+    build:
+      context: ./briefgen-frontend
+      dockerfile: Dockerfile
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true 
+    volumes:
+      - ./briefgen-frontend:/app
+      - node_modules:/app/node_modules
+    command: sh -c "([ -f package-lock.json ] && npm ci || npm install) && npm run dev -- --host 0.0.0.0"  
+    ports:
+      - "5173:5173"
+    depends_on:
+      - briefgen
+
 volumes:
   briefgen_data:
+  node_modules:

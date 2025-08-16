@@ -8,6 +8,12 @@ import uuid
 def gen_id() -> str:
     return uuid.uuid4().hex
 
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(index=True, unique=True)
+    password_hash: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 class Draft(SQLModel, table=True):
     id: str = Field(default_factory=gen_id, primary_key=True)
     template: str

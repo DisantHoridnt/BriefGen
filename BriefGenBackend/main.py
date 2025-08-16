@@ -8,15 +8,17 @@ from fastapi import FastAPI, Request, Depends, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 
 from itsdangerous import URLSafeSerializer, BadSignature
 from pydantic import BaseModel
 from sqlmodel import select, Session
 
 from .db import init_db, get_session
-from .models import Draft
+from .models import Draft, User
 from .schemas import AgentQuestionResponse
 from . import agent as agent_mod
+from passlib.context import CryptContext
 
 APP_NAME = "BriefGen"
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,19 +31,59 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
 app = FastAPI(title=APP_NAME)
 
+class SignupIn(BaseModel):
+    email: str
+    password: str
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+class MeOut(BaseModel):
+    email: str
+
+class ApiAuthIn(BaseModel):
+    password: str
+
+class TemplatesOut(BaseModel):
+    templates: list[str]
+
+class DraftCreateIn(BaseModel):
+    template: str
+
+class DraftCreateOut(BaseModel):
+    draft_id: str
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 serializer = URLSafeSerializer(APP_SECRET, salt="briefgen-auth")
 
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_pw(p: str) -> str: return pwd_ctx.hash(p)
+def verify_pw(p: str, h: str) -> bool: return pwd_ctx.verify(p, h)
+
 def _get_session_token(user: str = "admin") -> str:
     return serializer.dumps({"user": user, "ts": int(time.time())})
+
+def _set_session_cookie(response: JSONResponse | RedirectResponse, user: str = "admin"):
+    token = _get_session_token(user)
+    # same cookie name/shape as your HTML login
+    response.set_cookie("briefgen_session", token, httponly=True, samesite="lax", secure=False, path="/")
 
 def _check_session_token(token: str) -> bool:
     try:
         data = serializer.loads(token)
-        return isinstance(data, dict) and data.get("user") == "admin"
+        return isinstance(data, dict) and isinstance(data.get("user"), str) and bool(data.get("user"))
     except BadSignature:
         return False
 
@@ -76,6 +118,72 @@ async def rate_limit_middleware(request: Request, call_next):
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+@app.post("/api/signup", response_model=MeOut)
+def api_signup(body: SignupIn, request: Request, session: Session = Depends(get_session)):
+    # allow signup only if there are no users yet
+    exists = session.exec(select(User.id).limit(1)).first()
+    if exists is not None:
+        raise HTTPException(status_code=403, detail="Sign-ups disabled")
+
+    email = body.email.strip().lower()
+    if not email or not body.password:
+        raise HTTPException(400, "Email and password required")
+
+    # create user
+    user = User(email=email, password_hash=hash_pw(body.password))
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    # set cookie
+    resp = JSONResponse({"email": user.email})
+    _set_session_cookie(resp, user=user.email)
+    return resp
+
+@app.post("/api/login", response_model=MeOut)
+def api_login(body: LoginIn, request: Request, session: Session = Depends(get_session)):
+    email = body.email.strip().lower()
+    user = session.exec(select(User).where(User.email == email)).first()
+    if not user or not verify_pw(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    resp = JSONResponse({"email": user.email})
+    _set_session_cookie(resp, user=user.email)
+    return resp
+
+@app.get("/api/me", response_model=MeOut)
+def api_me(request: Request, session: Session = Depends(get_session)):
+    token = request.cookies.get("briefgen_session")
+    if not token:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        data = serializer.loads(token)
+        return {"email": data.get("user")}
+    except BadSignature:
+        raise HTTPException(401, "Unauthorized")
+
+@app.post("/api/auth")
+def api_auth(body: ApiAuthIn):
+    if body.password != ADMIN_PASS:
+        raise HTTPException(status_code=401, detail="Invalid password")
+    resp = JSONResponse({"ok": True})
+    _set_session_cookie(resp)
+    return resp
+
+@app.get("/api/templates", response_model=TemplatesOut)
+def api_templates():
+    # Drives the template picker
+    return {"templates": list(agent_mod.TEMPLATES.keys())}
+
+@app.post("/api/drafts", response_model=DraftCreateOut)
+def api_create_draft(body: DraftCreateIn, request: Request, session: Session = Depends(get_session)):
+    _require_auth(request)
+    if body.template not in agent_mod.TEMPLATES:
+        raise HTTPException(status_code=400, detail="Unknown template")
+    d = Draft(template=body.template)
+    session.add(d); session.commit(); session.refresh(d)
+    return {"draft_id": d.id}
 
 @app.get("/healthz")
 def healthz():
